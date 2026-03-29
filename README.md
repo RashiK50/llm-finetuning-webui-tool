@@ -1,6 +1,6 @@
 # llm-finetuning-webui-tool
 
-A web-based fine-tuning platform for training Mistral 7B v0.3 on GenAI regulatory Q&A data across California, New York, and Florida state legislation. Built as part of a TCS industry project.
+A web-based fine-tuning platform for training Mistral 7B v0.3 on GenAI regulatory Q&A data on California state legislation. Built as part of a TCS industry project.
 
 ---
 
@@ -21,6 +21,8 @@ This tool allows users to upload a JSON dataset of legislature Q&A pairs, config
 ---
 
 ## Project Structure
+
+### this is subject to change
 
 ```
 llm-finetuning-webui-tool/
@@ -144,8 +146,4 @@ OS      : Ubuntu 20.04 + CUDA 11.8
 - rouge-score
 - bert-score
 
----
 
-## License
-
-MIT License
