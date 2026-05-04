@@ -1,0 +1,102 @@
+[
+  {
+    "instruction": "What does California AB 2930 regulate?",
+    "output": "California AB 2930 requires businesses using automated decision tools to conduct impact assessments and notify individuals when such tools are used in consequential decisions such as hiring, housing, or credit."
+  },
+  {
+    "instruction": "What are the penalties for violating CPRA in California?",
+    "output": "Violations of CPRA can result in civil penalties of up to $2,500 per unintentional violation and $7,500 per intentional violation, enforced by the California Privacy Protection Agency."
+  },
+  {
+    "instruction": "What is the California Consumer Privacy Act?",
+    "output": "The CCPA gives California residents the right to know what personal data is collected, to delete personal data, to opt-out of the sale of personal data, and to non-discrimination for exercising their privacy rights."
+  },
+  {
+    "instruction": "What is the California Privacy Rights Act?",
+    "output": "The CPRA is an amendment to the CCPA that strengthens consumer privacy rights, creates the California Privacy Protection Agency, and adds new rights such as the right to correct inaccurate personal information and limit the use of sensitive personal information."
+  },
+  {
+    "instruction": "What does California SB 1047 propose?",
+    "output": "California SB 1047 proposes safety requirements for large AI models, requiring developers to implement safety protocols, conduct risk assessments, and maintain the ability to shut down AI systems that pose a risk of causing significant harm."
+  },
+  {
+    "instruction": "What is the California Automated Decision Systems Accountability Act?",
+    "output": "The California Automated Decision Systems Accountability Act requires state agencies to inventory their automated decision systems, assess their impacts on privacy and civil rights, and make those assessments publicly available."
+  },
+  {
+    "instruction": "What are the requirements for AI used in hiring under California law?",
+    "output": "California law requires employers using AI tools in hiring to disclose their use to candidates, conduct bias audits, and ensure that automated screening tools do not discriminate based on protected characteristics such as race, gender, or age."
+  },
+  {
+    "instruction": "What does California AB 331 regulate?",
+    "output": "California AB 331 regulates the use of automated decision tools by requiring deployers and developers to perform annual impact assessments, notify affected individuals, and provide opt-out mechanisms for consequential decisions."
+  },
+  {
+    "instruction": "What rights do California residents have regarding automated decision making?",
+    "output": "California residents have the right to be notified when automated decision tools are used in consequential decisions affecting them, the right to opt out of such automated processing, and the right to appeal decisions made by automated systems."
+  },
+  {
+    "instruction": "What is the California AI Transparency Act?",
+    "output": "The California AI Transparency Act requires large AI developers to provide users with a means to identify AI generated content, disclose when content is AI generated, and offer tools to detect synthetic media including deepfakes."
+  },
+  {
+    "instruction": "What does California law say about deepfakes?",
+    "output": "California law prohibits the use of deepfakes to influence elections, defame individuals, or create non-consensual intimate imagery. Violations can result in civil liability and in some cases criminal penalties."
+  },
+  {
+    "instruction": "What is California AB 602 about?",
+    "output": "California AB 602 allows individuals to sue for damages if their likeness is used to create sexually explicit deepfake content without their consent, providing a private right of action against the creator and distributor of such content."
+  },
+  {
+    "instruction": "What is California AB 730 about?",
+    "output": "California AB 730 prohibits the distribution of materially deceptive audio or visual media of a candidate for elective office within 60 days of an election with the intent to injure the candidate's reputation or deceive voters."
+  },
+  {
+    "instruction": "How does California regulate AI in healthcare?",
+    "output": "California requires that AI tools used in clinical decision making be transparent about their limitations, that healthcare providers inform patients when AI is used in their care, and that AI systems used in healthcare do not perpetuate bias in diagnosis or treatment recommendations."
+  },
+  {
+    "instruction": "What is the California Privacy Protection Agency?",
+    "output": "The California Privacy Protection Agency is an independent state agency created by the CPRA to implement and enforce California privacy laws, issue regulations, conduct audits, and investigate complaints related to consumer privacy rights."
+  },
+  {
+    "instruction": "What does California law require for AI generated content labeling?",
+    "output": "California law requires that AI generated content, particularly synthetic media and deepfakes, be clearly labeled as artificially generated. Platforms and developers must provide disclosure tools to help users identify content that was created or significantly altered by AI systems."
+  },
+  {
+    "instruction": "What is the scope of the CCPA?",
+    "output": "The CCPA applies to for-profit businesses operating in California that meet at least one of these thresholds: annual gross revenue over $25 million, buying or selling personal data of 100,000 or more consumers or households, or deriving 50% or more of annual revenue from selling personal data."
+  },
+  {
+    "instruction": "What sensitive personal information does CPRA protect?",
+    "output": "CPRA protects sensitive personal information including Social Security numbers, financial account details, precise geolocation, racial or ethnic origin, religious beliefs, union membership, contents of private communications, genetic data, and biometric data used for identification."
+  },
+  {
+    "instruction": "What are the obligations of AI developers under California SB 1047?",
+    "output": "Under California SB 1047, AI developers training large models above a certain compute threshold must implement a written safety and security protocol, maintain records of training data and safety incidents, and provide a mechanism to shut down the model if it poses serious risk of harm."
+  },
+  {
+    "instruction": "What is California's approach to regulating generative AI?",
+    "output": "California takes a multi-pronged approach to regulating generative AI through legislation targeting transparency, accountability, and safety. This includes disclosure requirements for AI generated content, bias audits for automated decision systems, and safety requirements for large foundation model developers."
+  },
+  {
+    "instruction": "What does California require for automated decision tools in lending?",
+    "output": "California requires that automated decision tools used in lending decisions do not discriminate against protected classes, provide adverse action notices explaining why credit was denied, and allow consumers to request human review of automated lending decisions."
+  },
+  {
+    "instruction": "How does California define an automated decision tool?",
+    "output": "California defines an automated decision tool as any system or technology that uses computation, including machine learning and artificial intelligence, to assist or replace human discretionary decision making in ways that have a legal or similarly significant effect on individuals."
+  },
+  {
+    "instruction": "What is California's data minimization requirement under CPRA?",
+    "output": "Under CPRA, businesses must limit the collection of personal information to what is reasonably necessary for the disclosed purpose. They cannot collect, use, retain, or share personal information beyond what is needed for the stated purpose for which it was collected."
+  },
+  {
+    "instruction": "What are the notice requirements for automated decision making in California?",
+    "output": "California requires that individuals be notified before or at the time an automated decision tool is used to make a consequential decision about them. The notice must explain what data is used, how the tool works, what the decision is, and how to request human review."
+  },
+  {
+    "instruction": "What is the California Bot Disclosure Law?",
+    "output": "The California Bot Disclosure Law prohibits the use of bots to communicate with Californians online with intent to mislead them about the bot's artificial identity. Anyone using a bot for commercial or political purposes must clearly disclose that the user is interacting with an automated system."
+  }
+]
