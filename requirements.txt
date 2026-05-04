@@ -12,3 +12,4 @@ bert-score
 numpy
 python-multipart
 pydantic
+dotenv
