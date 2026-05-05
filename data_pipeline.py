@@ -4,10 +4,8 @@ import shared_state as ss
 REQUIRED_FIELDS = {"instruction", "output"}
 
 
-def format_prompt(sample):
-    return {
-        "text": f"### Instruction:\n{sample['instruction']}\n\n### Response:\n{sample['output']}"
-    }
+def format_prompt(row):
+    return f"### Instruction:\n{row['instruction']}\n\n### Reasoning:\n{row['reasoning']}\n\n### Response:\n{row['output']}"
 
 
 def validate_and_load(data: list) -> dict:

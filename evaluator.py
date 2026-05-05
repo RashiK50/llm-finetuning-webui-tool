@@ -1,12 +1,11 @@
 # evaluator.py — Team 2
 # Runs evaluation on the fine-tuned model
-# Returns ROUGE-L, Exact Match, and sample outputs
+# Returns ROUGE-L, Exact Match, and sample outputs including Chain of Thought
 
 import torch
 import numpy as np
 from rouge_score import rouge_scorer as rouge_lib
 import shared_state as ss
-
 
 def run_evaluation(num_samples: int = 10):
     try:
@@ -16,49 +15,66 @@ def run_evaluation(num_samples: int = 10):
         tokenizer = ss.state["tokenizer"]
         test_dataset = ss.state["test_dataset"]
 
-        if model is None:
-            raise ValueError("Model not loaded.")
-        if test_dataset is None:
-            raise ValueError("Dataset not loaded.")
+        if model is None or test_dataset is None:
+            raise ValueError("Model or Dataset not loaded.")
+
+        # --- Dynamic Device Detection ---
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
+        
+        model.to(device) # Ensure model is on the correct device
 
         scorer = rouge_lib.RougeScorer(["rougeL"], use_stemmer=True)
+        rouge_scores, exact_matches, samples = [], [], []
 
-        rouge_scores = []
-        exact_matches = []
-        samples = []
-
-        # Cap at available test samples
         eval_data = test_dataset.select(range(min(num_samples, len(test_dataset))))
 
         for item in eval_data:
             instruction = item["instruction"]
             expected = item["output"]
 
-            prompt = f"### Instruction:\n{instruction}\n\n### Response:"
-            inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
+            # Changed prompt to trigger Chain of Thought reasoning FIRST
+            prompt = f"### Instruction:\n{instruction}\n\n### Reasoning:\n"
+            
+            inputs = tokenizer(prompt, return_tensors="pt").to(device)
 
             with torch.no_grad():
                 outputs = model.generate(
                     **inputs,
-                    max_new_tokens=200,
+                    max_new_tokens=300, # Increased token limit to accommodate reasoning + response
                     do_sample=False,
                     repetition_penalty=1.1
                 )
 
             generated = tokenizer.decode(outputs[0], skip_special_tokens=True)
-            model_answer = generated.split("### Response:")[-1].strip()
+            
+            # Extract everything generated after the prompt
+            generated_content = generated[len(prompt):].strip()
+            
+            # Split the reasoning from the final response
+            if "### Response:" in generated_content:
+                model_reasoning, model_answer = generated_content.split("### Response:", 1)
+                model_reasoning = model_reasoning.strip()
+                model_answer = model_answer.strip()
+            else:
+                # Fallback if the model fails to output the Response tag
+                model_reasoning = "Model failed to format Chain of Thought properly."
+                model_answer = generated_content.strip()
 
-            # Exact match
+            # Metric Calculation (Only grading the final answer, not the reasoning)
             exact = 1 if model_answer.strip() == expected.strip() else 0
             exact_matches.append(exact)
-
-            # ROUGE-L
             score = scorer.score(expected, model_answer)
             rouge_scores.append(score["rougeL"].fmeasure)
 
             samples.append({
                 "question": instruction,
                 "expected": expected,
+                "model_reasoning": model_reasoning,
                 "model_output": model_answer,
                 "rouge_l": round(score["rougeL"].fmeasure, 4),
                 "exact_match": exact
@@ -76,7 +92,6 @@ def run_evaluation(num_samples: int = 10):
 
         ss.state["eval_results"] = result
         ss.state["status"] = "done"
-
         return result
 
     except Exception as e:

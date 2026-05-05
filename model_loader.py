@@ -1,114 +1,81 @@
 import os
-import time
-import traceback
+import shutil
+import platform
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-from peft import prepare_model_for_kbit_training
+from huggingface_hub import scan_cache_dir
+from transformers import AutoModelForCausalLM, AutoTokenizer
 import shared_state as ss
 
+# Define a local temporary path for model files
+TEMP_MODEL_DIR = "./temp_model_cache"
 
-def load_model(model_name: str = "mistralai/Mistral-7B-v0.3") -> dict:
-    # Already loaded
-    if ss.state["model"] is not None:
-        return {
-            "success": True,
-            "message": "Model already loaded — skipping reload.",
-            "model_name": ss.state["model_name"],
-            "gpu_memory_used_gb": _gpu_mem(),
-            "quantization_config": ss.state["quantization_config"],
-        }
-
-    # HF token check
+def load_model(model_name: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0") -> dict:
+    # 1. Environment & Device Detection
     hf_token = os.getenv("HF_TOKEN")
-    if not hf_token:
-        raise ValueError("HF_TOKEN not found. Add it to your .env file.")
-
-    # CUDA check
-    if not torch.cuda.is_available():
-        raise EnvironmentError("No CUDA GPU detected. Need 6GB+ VRAM.")
-
-    # VRAM check
-    free_vram = (
-        torch.cuda.get_device_properties(0).total_memory
-        - torch.cuda.memory_allocated(0)
-    ) / 1e9
-    if free_vram < 5.5:
-        raise EnvironmentError(f"Only {free_vram:.2f}GB VRAM free. Need at least 6GB.")
+    is_mac = platform.system() == "Darwin"
+    device = "mps" if is_mac and torch.backends.mps.is_available() else "cpu"
 
     ss.state["status"] = "loading_model"
-    ss.state["error_message"] = None
+    
+    # Create temp directory if it doesn't exist
+    os.makedirs(TEMP_MODEL_DIR, exist_ok=True)
 
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,   # bfloat16 — not float16
-        bnb_4bit_use_double_quant=True,
-    )
-    quant_summary = {
-        "load_in_4bit": True,
-        "quant_type": "nf4",
-        "compute_dtype": "bfloat16",
-        "double_quant": True,
-    }
-
-    start = time.perf_counter()
     try:
+        print(f"Downloading {model_name} to temporary storage...")
+        
+        # 2. Tokenizer Setup (pointed to temp dir)
         tokenizer = AutoTokenizer.from_pretrained(
-            model_name, token=hf_token, trust_remote_code=True
+            model_name, 
+            token=hf_token, 
+            cache_dir=TEMP_MODEL_DIR
         )
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        tokenizer.padding_side = "right"
 
+        # 3. Model Loading (Loads into RAM/MPS, then we can wipe disk)
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            quantization_config=bnb_config,
-            device_map="auto",
+            torch_dtype=torch.bfloat16 if device == "mps" else torch.float32,
+            device_map={"": device},
             token=hf_token,
-            trust_remote_code=True,
+            cache_dir=TEMP_MODEL_DIR,
+            trust_remote_code=True
         )
-        model = prepare_model_for_kbit_training(model)
         model.eval()
 
-    except OSError as e:
-        _set_error(str(e))
-        msg = "Invalid or expired HF_TOKEN." if "401" in str(e) else str(e)
-        raise OSError(msg)
-    except RuntimeError as e:
-        _set_error(str(e))
-        msg = "CUDA out of memory." if "out of memory" in str(e).lower() else str(e)
-        raise RuntimeError(msg)
-    except Exception:
-        tb = traceback.format_exc()
-        _set_error(tb)
-        raise
+        # 4. THE FLUSH: Wipe the downloaded files from disk
+        print("Model loaded into memory. Flushing disk storage...")
+        _flush_hf_cache(model_name)
+
+    except Exception as e:
+        # If it fails, still try to clean up
+        if os.path.exists(TEMP_MODEL_DIR):
+            shutil.rmtree(TEMP_MODEL_DIR)
+        ss.state["status"] = "error"
+        ss.state["error_message"] = str(e)
+        raise e
 
     ss.state.update({
         "model": model,
         "tokenizer": tokenizer,
         "model_name": model_name,
         "model_loaded": True,
-        "quantization_config": quant_summary,
         "status": "model_ready",
     })
 
-    return {
-        "success": True,
-        "message": f"Model '{model_name}' loaded successfully.",
-        "model_name": model_name,
-        "load_time_seconds": round(time.perf_counter() - start, 2),
-        "gpu_memory_used_gb": _gpu_mem(),
-        "quantization_config": quant_summary,
-    }
+    return {"success": True, "message": f"Loaded and disk flushed. Running on {device.upper()}."}
 
-
-def _gpu_mem() -> float:
+def _flush_hf_cache(repo_id: str):
+    """Scan the temp directory and delete the cached revision of the model."""
     try:
-        return round(torch.cuda.memory_allocated() / 1e9, 3)
-    except Exception:
-        return 0.0
-
-
-def _set_error(msg: str):
-    ss.state["status"] = "error"
-    ss.state["error_message"] = msg
+        cache_info = scan_cache_dir(TEMP_MODEL_DIR)
+        for repo in cache_info.repos:
+            if repo.repo_id == repo_id:
+                # Get the strategy to delete all revisions for this model
+                delete_strategy = cache_info.delete_revisions(*[r.commit_hash for r in repo.revisions])
+                delete_strategy.execute()
+        
+        # Final safety: remove the actual folder structure if empty
+        if os.path.exists(TEMP_MODEL_DIR):
+            shutil.rmtree(TEMP_MODEL_DIR)
+            os.makedirs(TEMP_MODEL_DIR, exist_ok=True)
+    except Exception as e:
+        print(f"Cleanup warning: {e}")
