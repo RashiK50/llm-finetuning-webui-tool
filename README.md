@@ -1,149 +1,59 @@
-# llm-finetuning-webui-tool
+# LLM Fine-Tuning WebUI Tool
 
-A web-based fine-tuning platform for training Mistral 7B v0.3 on GenAI regulatory Q&A data on California state legislation. Built as part of a TCS industry project.
-
----
-
-## Overview
-
-This tool allows users to upload a JSON dataset of legislature Q&A pairs, configure training parameters, and fine-tune Mistral 7B using SFT + LoRA — all through a simple web interface without writing any code. The fine-tuned model targets 80-90% accuracy on regulatory questions.
-
----
+A lightweight FastAPI-based backend tool for fine-tuning Large Language Models (like Mistral 7B or TinyLlama) using Supervised Fine-Tuning (SFT) and LoRA (Low-Rank Adaptation). It is designed to fine-tune an LLM on California Legislature QA data utilizing a specialized Chain of Thought strategy.
 
 ## Features
 
-- Upload a JSON file of legislature Q&A pairs via the UI
-- Configure LoRA hyperparameters (rank, alpha, learning rate, epochs)
-- Train Mistral 7B using Supervised Fine-Tuning and QLoRA
-- Monitor live training loss and evaluation metrics
-- Export the fine-tuned LoRA adapter or merged model
+- **Model Loading:** Supports loading models onto GPUs in optimized formats using Hugging Face `transformers` and `bitsandbytes` (4-bit NF4 + bfloat16 representation when deployed appropriately). By default, uses `TinyLlama/TinyLlama-1.1B-Chat-v1.0` for local testing and `mistralai/Mistral-7B-v0.3` for production.
+- **Dataset Pipeline:** Upload datasets in JSON format (`instruction`, `reasoning`, `output`). The pipeline automatically formats prompts into a predefined structure to prompt Chain of Thought (CoT).
+- **Training (LoRA):** Configure LoRA hyperparameters (rank, alpha, dropout) directly through the API. Training utilizes `peft` and Hugging Face's `Trainer` for efficient, distributed training with status polling logic.
+- **Evaluation:** Evaluates the fine-tuned model against a test data split, tracking Exact Match and ROUGE-L scores using `rouge-score`. Examines the generated Chain of Thought reasoning vs. the final response.
+- **Exporting Options:** Export either just the LoRA adapter (~100MB zip) or the fully merged model zip (~14GB).
 
----
+## API Endpoints
 
-## Project Structure
+The API is divided into two conceptual operations. You can access the Swagger UI directly at `/docs` (e.g., `http://localhost:8000/docs`).
 
-### this is subject to change
+### Data & Model
+- `GET /api/status` - Check the current application state, model readiness, dataset size, and GPU usage.
+- `POST /api/load-model` - Load a base Hugging Face model onto the device into persistent caching.
+- `POST /api/upload-dataset` - Upload the JSON task dataset.
 
-```
-llm-finetuning-webui-tool/
-├── app/
-│   ├── gradio_app.py        # Main Gradio UI
-│   ├── trainer.py           # SFT + LoRA training pipeline
-│   ├── model_loader.py      # Loads Mistral 7B in 4-bit
-│   ├── evaluator.py         # ROUGE, BERTScore, accuracy
-│   └── utils.py             # JSON validation and formatting
-├── data/
-│   ├── sample_ca.json       # Sample California Q&A
-│   ├── sample_ny.json       # Sample New York Q&A
-│   └── sample_fl.json       # Sample Florida Q&A
-├── notebooks/
-│   └── training_pipeline.ipynb
-├── outputs/
-├── requirements.txt
-├── .env.example
-└── README.md
-```
-
----
+### Training & Evaluation
+- `POST /api/train` - Kick off the background training task with custom training and LoRA parameters.
+- `GET /api/progress` - Long-poll endpoint to retrieve live training loss and epochs.
+- `POST /api/evaluate` - Test the fine-tuned model using a test dataset split to visualize text generation mapping and retrieve ROUGE/Exact Match metrics.
+- `GET /api/export` - Package model checkpoints into zip maps. Download LoRA adapters or a fully merged model.
 
 ## Installation
 
-Clone the repo
+Make sure your environment is configured for GPU access if you plan to train on-device (CUDA strongly recommended).
 
-```bash
-git clone https://github.com/your-username/llm-finetuning-webui-tool.git
-cd llm-finetuning-webui-tool
-```
+1. Install the Python dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. Set up your `.env` file (requires Hugging Face token to download certain models like Mistral).
+   ```env
+   HF_TOKEN=your_hf_token_here
+   ```
 
-Install dependencies
+## Usage
 
-```bash
-pip install -r requirements.txt
-```
+1. **Start the API server:**
+   ```bash
+   python main.py
+   ```
+   The sever will start on `http://0.0.0.0:8000`.
 
-Set up HuggingFace token
-
-```bash
-cp .env.example .env
-# Add your HF_TOKEN to .env
-```
-
-Launch the UI
-
-```bash
-python app/gradio_app.py
-```
-
-Open your browser at `http://localhost:7860`
-
----
-
-## Input Data Format
-
-```json
-[
-  {
-    "instruction": "What does California AB 2930 regulate?",
-    "output": "California AB 2930 requires businesses using automated decision tools to conduct impact assessments and notify individuals when such tools are used in consequential decisions."
-  },
-  {
-    "instruction": "What are New York's requirements for AI in hiring?",
-    "output": "New York Local Law 144 requires employers using AI hiring tools to conduct annual bias audits and publicly disclose results before deploying the tool."
-  }
-]
-```
-
----
-
-## UI Tabs
-
-| Tab | Description |
-|---|---|
-| Load Model | Select and load Mistral 7B v0.3 in 4-bit |
-| Dataset | Upload legislature JSON and preview Q&A pairs |
-| Fine-Tune | Set LoRA rank, epochs, learning rate and start training |
-| Evaluate | Run test questions and view accuracy score |
-| Export | Download LoRA adapter or merged model |
-
----
-
-## Model and Training
-
-| Component | Details |
-|---|---|
-| Base Model | mistralai/Mistral-7B-v0.3 |
-| Fine-Tuning Method | Supervised Fine-Tuning (SFT) |
-| Parameter Efficiency | LoRA / QLoRA via peft |
-| Training Framework | trl SFTTrainer |
-| Quantization | 4-bit NF4 via bitsandbytes |
-| Evaluation | ROUGE-L, BERTScore, Exact Match |
-
----
-
-## Cloud Setup
-
-Recommended GCP instance:
-
-```
-Machine : n1-standard-8
-GPU     : NVIDIA T4 (16GB) or A100 (40GB)
-Disk    : 100GB SSD
-OS      : Ubuntu 20.04 + CUDA 11.8
-```
-
----
+2. **Access Swagger UI:**
+   Navigate to `http://localhost:8000/docs` to test out the endpoints. Ensure you call the functions sequentially: 
+   1. `/api/load-model` 
+   2. `/api/upload-dataset` 
+   3. `/api/train`
 
 ## Tech Stack
-
-- transformers
-- trl
-- peft
-- bitsandbytes
-- unsloth
-- datasets
-- gradio
-- wandb
-- rouge-score
-- bert-score
-
-
+- **FastAPI / Uvicorn** - Web Server
+- **Hugging Face (`transformers`, `datasets`, `peft`, `trl`)** - Model pipelines, datasets, and LoRA
+- **PyTorch / Accelerate** - Base computational graph
+- **Rouge Score** - Response Evaluation metric
