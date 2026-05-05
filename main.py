@@ -45,12 +45,13 @@ class EvaluateRequest(BaseModel):
 
 @app.get("/api/status", tags=["Team 1 — Data & Model"])
 def get_status():
-    """Single source of truth. Check before calling anything else."""
+    """Check this to verify the dataset is actually in memory."""
     return {
         "status": ss.state["status"],
         "model_loaded": ss.state["model_loaded"],
         "model_name": ss.state["model_name"],
-        "dataset_ready": ss.state["dataset"] is not None,
+        # FIX: Check for train_dataset
+        "dataset_ready": ss.state["train_dataset"] is not None, 
         "dataset_size": ss.state["dataset_size"],
         "current_epoch": ss.state["current_epoch"],
         "current_step": ss.state["current_step"],
@@ -58,7 +59,6 @@ def get_status():
         "gpu_available": torch.cuda.is_available(),
         "gpu_memory_used_gb": _gpu_mem(),
     }
-
 
 @app.post("/api/load-model", tags=["Team 1 — Data & Model"])
 def load_model_endpoint(request: LoadModelRequest):
@@ -96,14 +96,13 @@ async def upload_dataset(file: UploadFile = File(...)):
 
 @app.post("/api/train", tags=["Team 2 — Training & Evaluation"])
 def start_training(request: TrainRequest, background_tasks: BackgroundTasks):
-    """
-    Kicks off SFT + LoRA as a background task.
-    Poll GET /api/progress every 2-3 seconds to watch loss.
-    """
     if not ss.state["model_loaded"]:
         raise HTTPException(status_code=400, detail="Load the model first via /api/load-model.")
-    if ss.state["dataset"] is None:
+    
+    # FIX: Change this from ["dataset"] to ["train_dataset"]
+    if ss.state["train_dataset"] is None: 
         raise HTTPException(status_code=400, detail="Upload a dataset first via /api/upload-dataset.")
+        
     if ss.state["status"] == "training":
         raise HTTPException(status_code=400, detail="Training already in progress.")
 

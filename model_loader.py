@@ -1,22 +1,21 @@
 import os
-import platform
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import shared_state as ss
 
-# Renamed to signify permanent storage
+# Persistent local storage
 MODEL_DIR = "./model_weights"
 
 def load_model(model_name: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0") -> dict:
     hf_token = os.getenv("HF_TOKEN")
-    is_mac = platform.system() == "Darwin"
-    device = "mps" if is_mac and torch.backends.mps.is_available() else "cpu"
-
+    
+    # Force CUDA for your RTX GPU
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     ss.state["status"] = "loading_model"
     os.makedirs(MODEL_DIR, exist_ok=True)
 
     try:
-        print(f"Loading {model_name} from {MODEL_DIR}...")
+        print(f"Loading {model_name} onto {device.upper()}...")
         
         tokenizer = AutoTokenizer.from_pretrained(
             model_name, 
@@ -26,16 +25,14 @@ def load_model(model_name: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0") -> dict:
 
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=torch.bfloat16 if device == "mps" else torch.float32,
-            device_map={"": device},
+            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+            device_map="auto", # Automatically handles RTX memory
             token=hf_token,
             cache_dir=MODEL_DIR,
             trust_remote_code=True
         )
-        model.eval()
 
-        # REMOVED: _flush_hf_cache call to keep files on disk
-        print(f"Model loaded and preserved in {MODEL_DIR}.")
+        print(f"Model stored locally in {MODEL_DIR}. Ready to train.")
 
     except Exception as e:
         ss.state["status"] = "error"
@@ -50,4 +47,4 @@ def load_model(model_name: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0") -> dict:
         "status": "model_ready",
     })
 
-    return {"success": True, "message": f"Loaded. Running on {device.upper()}. Files kept in {MODEL_DIR}."}
+    return {"success": True, "message": f"Loaded on {device.upper()}. Weights saved locally."}

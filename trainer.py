@@ -1,84 +1,89 @@
-# trainer.py
 import torch
-import os
-from transformers import TrainerCallback
-from peft import LoraConfig, get_peft_model
-from trl import SFTTrainer, SFTConfig
+import traceback
+from transformers import Trainer, TrainingArguments, TrainerCallback
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 import shared_state as ss
 
-class ProgressCallback(TrainerCallback):
+class StateUpdateCallback(TrainerCallback):
     def on_log(self, args, state, control, logs=None, **kwargs):
         if logs and "loss" in logs:
-            ss.state["training_loss"].append(round(logs["loss"], 4))
+            ss.state["training_loss"].append(logs["loss"])
             ss.state["current_step"] = state.global_step
 
-    def on_epoch_end(self, args, state, control, **kwargs):
-        ss.state["current_epoch"] = int(state.epoch)
-
-def run_training(
-    lora_rank: int = 16,
-    lora_alpha: int = 32,
-    lora_dropout: float = 0.05,
-    learning_rate: float = 2e-4,
-    epochs: int = 3,
-    batch_size: int = 2,
-):
+# We add **kwargs here to "catch" anything the UI sends (like lora_rank)
+def run_training(**kwargs):
     try:
         ss.state["status"] = "training"
-        ss.state["training_loss"] = []
+        model = ss.state["model"]
+        tokenizer = ss.state["tokenizer"]
+        dataset = ss.state["train_dataset"]
+
+        # 1. Capture UI values or use defaults
+        # This handles the 'lora_rank' error specifically
+        l_rank = kwargs.get('lora_rank', 16)
+        l_alpha = kwargs.get('lora_alpha', 32)
+        lr = kwargs.get('learning_rate', 1e-4)
+        batch_size = kwargs.get('batch_size', 2)
+
+        # 2. TOKENIZER
+        tokenizer.pad_token = tokenizer.eos_token
         
-        # Pull from shared state
-        model = ss.state.get("model")
-        tokenizer = ss.state.get("tokenizer")
-        train_dataset = ss.state.get("train_dataset")
+        def tokenize_function(examples):
+            # Tokenize the text
+            outputs = tokenizer(
+                examples["text"], 
+                truncation=True, 
+                padding="max_length", 
+                max_length=512
+            )
+            
+            # CRITICAL FIX: The model needs 'labels' to calculate loss.
+            # For Causal LM, labels are identical to input_ids.
+            outputs["labels"] = [list(ids) for ids in outputs["input_ids"]]
+            
+            return outputs
 
-        if model is None or train_dataset is None:
-            raise ValueError("State is empty. Please call /load-model and /upload-dataset again.")
+        tokenized_dataset = dataset.map(tokenize_function, batched=True)
 
-        # Lora Setup - Simplified target modules for TinyLlama stability
-        lora_config = LoraConfig(
-            r=lora_rank,
-            lora_alpha=lora_alpha,
-            target_modules=["q_proj", "v_proj"], 
-            lora_dropout=lora_dropout,
+        # 3. PREP FOR LORA
+        model = prepare_model_for_kbit_training(model)
+        
+        config = LoraConfig(
+            r=int(l_rank), 
+            lora_alpha=int(l_alpha),
+            target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
+            lora_dropout=0.05,
             bias="none",
             task_type="CAUSAL_LM"
         )
+        model = get_peft_model(model, config)
 
-        model = get_peft_model(model, lora_config)
-        
-        training_args = SFTConfig(
-            output_dir="./outputs/checkpoints",
-            num_train_epochs=epochs,
-            per_device_train_batch_size=batch_size,
-            gradient_accumulation_steps=4,
-            learning_rate=learning_rate,
+        # 4. TRAINING ARGS
+        training_args = TrainingArguments(
+            output_dir="./tiny_outputs",
+            per_device_train_batch_size=int(batch_size),
+            gradient_accumulation_steps=8,
+            warmup_steps=10,
+            max_steps=50,                       
+            learning_rate=float(lr),
+            fp16=True,
             logging_steps=1,
-            # M4 specific settings
-            bf16=False, 
-            fp16=False,
-            report_to="none",
-            dataset_text_field="text",
-            max_seq_length=512
+            optim="paged_adamw_8bit",
+            gradient_checkpointing=True,
+            report_to="none"
         )
 
-        trainer = SFTTrainer(
+        trainer = Trainer(
             model=model,
-            train_dataset=train_dataset,
             args=training_args,
-            processing_class=tokenizer,
-            callbacks=[ProgressCallback()]
+            train_dataset=tokenized_dataset,
+            callbacks=[StateUpdateCallback()]
         )
 
         trainer.train()
-        
-        # Save results
-        model.save_pretrained("./outputs/final_adapter")
-        ss.state["status"] = "done"
-        print("Training complete.")
+        ss.state["status"] = "finished"
 
     except Exception as e:
         ss.state["status"] = "error"
         ss.state["error_message"] = str(e)
-        print(f"Error during training: {e}")
-        raise e
+        traceback.print_exc()
