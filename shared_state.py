@@ -2,9 +2,13 @@ state = {
     # Model
     "model": None,
     "tokenizer": None,
-    "model_name": None,
-    "model_loaded": False,
-    "quantization_config": None,
+    "train_dataset": None,
+    "status": "idle",             # 'idle', 'loading_model', 'training', 'error'
+    "is_model_loaded": False,     # Fix 1: Explicit model status
+    "is_dataset_loaded": False,   # Fix 1: Explicit dataset status
+    "current_step": 0,
+    "training_loss": [],
+    "error_message": "",
 
     # Dataset
     "dataset": None,

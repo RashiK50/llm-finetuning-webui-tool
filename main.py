@@ -23,7 +23,6 @@ app = FastAPI(
     version="1.0.0",
 )
 
-
 # ── Request bodies ────────────────────────────────────────────────────────────
 
 class LoadModelRequest(BaseModel):
@@ -41,140 +40,188 @@ class EvaluateRequest(BaseModel):
     num_samples: Optional[int] = 10
 
 
+class ChatRequest(BaseModel):
+    message: str
+    max_tokens: Optional[int] = 200
+    temperature: Optional[float] = 0.7
+
 # ── Team 1 — Data & Model ─────────────────────────────────────────────────────
 
 @app.get("/api/status", tags=["Team 1 — Data & Model"])
 def get_status():
     """Check this to verify the dataset is actually in memory."""
     return {
-        "status": ss.state["status"],
-        "model_loaded": ss.state["model_loaded"],
-        "model_name": ss.state["model_name"],
-        # FIX: Check for train_dataset
-        "dataset_ready": ss.state["train_dataset"] is not None, 
-        "dataset_size": ss.state["dataset_size"],
-        "current_epoch": ss.state["current_epoch"],
-        "current_step": ss.state["current_step"],
-        "error_message": ss.state["error_message"],
+        "status": ss.state.get("status", "idle"),
+        "model_loaded": ss.state.get("model_loaded", False),
+        "model_name": ss.state.get("model_name", None),
+        "dataset_ready": ss.state.get("train_dataset") is not None, 
+        "dataset_size": ss.state.get("dataset_size", 0),
+        "current_epoch": ss.state.get("current_epoch", 0),
+        "current_step": ss.state.get("current_step", 0),
+        "error_message": ss.state.get("error_message", ""),
         "gpu_available": torch.cuda.is_available(),
         "gpu_memory_used_gb": _gpu_mem(),
     }
 
-@app.post("/api/load-model", tags=["Team 1 — Data & Model"])
-def load_model_endpoint(request: LoadModelRequest):
+
+@app.post("/api/generate", tags=["Team 2 — Training & Evaluation"])
+async def generate_response(request: ChatRequest):
     """
-    Loads model in 4-bit NF4 + bfloat16.
-    For local testing: TinyLlama/TinyLlama-1.1B-Chat-v1.0
-    For production: mistralai/Mistral-7B-v0.3
+    Hit this to chat with your fine-tuned model.
     """
+    if not ss.state.get("model_loaded") or ss.state.get("model") is None:
+        raise HTTPException(status_code=400, detail="Model not loaded.")
+    
+    model = ss.state["model"]
+    tokenizer = ss.state["tokenizer"]
+
     try:
-        return load_model(request.model_name)
+        # Prepare the prompt (matching the training format is key!)
+        prompt = f"Instruction: {request.message}\nOutput: "
+        
+        # Move inputs to the correct device (MPS for Mac, CUDA for Windows)
+        device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
+        inputs = tokenizer(prompt, return_tensors="pt").to(device)
+
+        # Generate
+        with torch.no_grad():
+            output_tokens = model.generate(
+                **inputs,
+                max_new_tokens=request.max_tokens,
+                temperature=request.temperature,
+                do_sample=True if request.temperature > 0 else False,
+                pad_token_id=tokenizer.eos_token_id
+            )
+
+        # Decode and clean up the output
+        full_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+        response = full_text.split("Output:")[-1].strip()
+
+        return {"success": True, "response": response}
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/load-model", tags=["Team 1 — Data & Model"])
+def load_model_endpoint(request: LoadModelRequest, background_tasks: BackgroundTasks):
+    """
+    Loads model in background to prevent frontend timeout.
+    """
+    if ss.state.get("status") == "loading_model":
+        raise HTTPException(status_code=400, detail="A model is already loading.")
+        
+    # FIX: Move load_model to a background task
+    background_tasks.add_task(load_model, request.model_name)
+    
+    return {
+        "success": True, 
+        "message": f"Started loading {request.model_name} in the background. Poll /api/status for updates."
+    }
+
 @app.post("/api/upload-dataset", tags=["Team 1 — Data & Model"])
 async def upload_dataset(file: UploadFile = File(...)):
     """
-    Upload a .json file of QA pairs.
-    Format: [{"instruction": "...", "output": "..."}]
+    Upload a .json file of QA pairs, saves it to disk, then loads it into memory.
     """
     if not file.filename.endswith(".json"):
         raise HTTPException(status_code=400, detail="Only .json files accepted.")
+    
     try:
         content = await file.read()
         data = json.loads(content)
+        
+        # FIX: Actually save the dataset to disk so it isn't lost
+        os.makedirs("data", exist_ok=True)
+        save_path = os.path.join("data", "latest_uploaded_dataset.json")
+        with open(save_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON.")
+        
     try:
-        return validate_and_load(data)
+        # Assuming validate_and_load populates ss.state["train_dataset"]
+        result = validate_and_load(data)
+        return {"success": True, "message": f"Dataset uploaded and saved to {save_path}", "details": result}
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-
 
 # ── Team 2 — Training & Evaluation ───────────────────────────────────────────
 
 @app.post("/api/train", tags=["Team 2 — Training & Evaluation"])
 def start_training(request: TrainRequest, background_tasks: BackgroundTasks):
-    if not ss.state["model_loaded"]:
+    if not ss.state.get("model_loaded"):
         raise HTTPException(status_code=400, detail="Load the model first via /api/load-model.")
     
-    # FIX: Change this from ["dataset"] to ["train_dataset"]
-    if ss.state["train_dataset"] is None: 
+    if ss.state.get("train_dataset") is None: 
         raise HTTPException(status_code=400, detail="Upload a dataset first via /api/upload-dataset.")
         
-    if ss.state["status"] == "training":
+    if ss.state.get("status") == "training":
         raise HTTPException(status_code=400, detail="Training already in progress.")
 
     background_tasks.add_task(run_training, **request.model_dump())
-    return {"success": True, "message": "Training started.", "config": request.model_dump()}
-
+    return {"success": True, "message": "Training started in background.", "config": request.model_dump()}
 
 @app.get("/api/progress", tags=["Team 2 — Training & Evaluation"])
 def get_progress():
     """Poll this every 2-3 seconds during training to get live loss updates."""
+    losses = ss.state.get("training_loss", [])
     return {
-        "status": ss.state["status"],
-        "current_epoch": ss.state["current_epoch"],
-        "current_step": ss.state["current_step"],
-        "latest_loss": ss.state["training_loss"][-1] if ss.state["training_loss"] else None,
-        "all_losses": ss.state["training_loss"],
-        "error_message": ss.state["error_message"],
+        "status": ss.state.get("status"),
+        "current_epoch": ss.state.get("current_epoch"),
+        "current_step": ss.state.get("current_step"),
+        "latest_loss": losses[-1] if losses else None,
+        "all_losses": losses,
+        "error_message": ss.state.get("error_message"),
     }
-
 
 @app.post("/api/evaluate", tags=["Team 2 — Training & Evaluation"])
 def evaluate(request: EvaluateRequest):
-    """
-    Evaluates the fine-tuned model on the test split.
-    Returns ROUGE-L, BERTScore, Token F1, and sample outputs.
-    """
-    if ss.state["model"] is None:
+    if ss.state.get("model") is None:
         raise HTTPException(status_code=400, detail="No model loaded.")
-    if ss.state["test_dataset"] is None:
-        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    if ss.state.get("test_dataset") is None:
+        raise HTTPException(status_code=400, detail="No test dataset loaded.")
     try:
         return run_evaluation(num_samples=request.num_samples)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/export", tags=["Team 2 — Training & Evaluation"])
-def export_model(type: str = "lora"):
-    """
-    Export the fine-tuned model.
-    ?type=lora    → LoRA adapter zip (~100MB)
-    ?type=merged  → Full merged model zip (~14GB)
-    """
-    if ss.state["model"] is None:
+async def export_model(type: str = "lora", background_tasks: BackgroundTasks = None):
+    if ss.state.get("model") is None:
         raise HTTPException(status_code=400, detail="No model to export.")
 
-    os.makedirs("./outputs", exist_ok=True)
+    # Create a unique output directory
+    output_base = "./outputs"
+    export_dir = os.path.join(output_base, f"export_{type}")
+    os.makedirs(export_dir, exist_ok=True)
 
-    if type == "lora":
-        path = "./outputs/lora-adapter"
-        os.makedirs(path, exist_ok=True)
-        ss.state["model"].save_pretrained(path)
-        ss.state["tokenizer"].save_pretrained(path)
-        _write_model_card(path)
-        zip_path = shutil.make_archive("./outputs/lora-adapter", "zip", path)
-        return FileResponse(zip_path, filename="lora-adapter.zip", media_type="application/zip")
+    try:
+        ss.state["status"] = "exporting"
+        
+        if type == "lora":
+            # LoRA is small (~50MB-200MB), zipping is usually okay
+            ss.state["model"].save_pretrained(export_dir)
+            ss.state["tokenizer"].save_pretrained(export_dir)
+            _write_model_card(export_dir)
+            
+            # Use a faster zip approach or return path
+            return {"success": True, "message": f"Model saved to {export_dir}", "path": os.path.abspath(export_dir)}
 
-    elif type == "merged":
-        try:
-            merged = ss.state["model"].merge_and_unload()
-            path = "./outputs/merged-model"
-            os.makedirs(path, exist_ok=True)
-            merged.save_pretrained(path)
-            ss.state["tokenizer"].save_pretrained(path)
-            _write_model_card(path)
-            zip_path = shutil.make_archive("./outputs/merged-model", "zip", path)
-            return FileResponse(zip_path, filename="merged-model.zip", media_type="application/zip")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Merge failed: {str(e)}")
+        elif type == "merged":
+            # WARNING: Merging on an 8GB/16GB Mac will likely cause a crash/freeze
+            # We suggest returning the LoRA path instead, but if you want to try:
+            merged_model = ss.state["model"].merge_and_unload()
+            merged_model.save_pretrained(export_dir)
+            ss.state["tokenizer"].save_pretrained(export_dir)
+            
+            ss.state["status"] = "model_ready"
+            return {"success": True, "message": f"Full model merged and saved to {export_dir}"}
 
-    raise HTTPException(status_code=400, detail="type must be 'lora' or 'merged'.")
-
+    except Exception as e:
+        ss.state["status"] = "error"
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -184,18 +231,16 @@ def _gpu_mem() -> float:
     except Exception:
         return 0.0
 
-
 def _write_model_card(path: str):
     card = {
-        "base_model": ss.state["model_name"],
+        "base_model": ss.state.get("model_name"),
         "fine_tuned_on": "CA Legislature QA",
-        "dataset_size": ss.state["dataset_size"],
-        "lora_config": ss.state["lora_config"],
-        "eval_results": ss.state["eval_results"],
+        "dataset_size": ss.state.get("dataset_size"),
+        "lora_config": ss.state.get("lora_config"),
+        "eval_results": ss.state.get("eval_results"),
     }
     with open(f"{path}/model_card.json", "w") as f:
         json.dump(card, f, indent=2)
-
 
 if __name__ == "__main__":
     import uvicorn

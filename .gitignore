@@ -1,4 +1,10 @@
 venv
 .env
 __pycache__
+
+node_modules
+dist
+temp_model_cache
 model_weights
+outputs
+tcs-backend.zip
