@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+transformers
+trl
+peft
+bitsandbytes
+datasets
+accelerate
+torch
+rouge-score
+bert-score
+numpy
+python-multipart
+pydantic
+python-dotenv
+huggingface_hub
+gitpython
