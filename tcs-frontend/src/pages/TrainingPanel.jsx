@@ -239,6 +239,9 @@ export default function TrainingPanel() {
     const poll = async () => {
       try {
         const d = await api.progress();
+        if (d?.status === 'error' && d?.error_message) {
+          setErrorMsg(d.error_message);
+        }
         const losses = d.all_losses ?? d.training_loss ?? [];
         const accuracies = d.all_accuracies ?? d.training_accuracy ?? [];
         setData(
@@ -262,7 +265,6 @@ export default function TrainingPanel() {
     }
 
     if (status === 'error') {
-      setErrorMsg('Training failed.');
       clearInterval(intervalId);
     }
 
