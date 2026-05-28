@@ -1,6 +1,6 @@
 # evaluator.py — Team 2
 # Runs evaluation on the fine-tuned model
-# Returns ROUGE-L, Exact Match, and sample outputs including Chain of Thought
+# Returns ROUGE-L, BERTScore F1, and sample outputs including Chain of Thought
 
 import torch
 import numpy as np
@@ -126,7 +126,7 @@ def run_evaluation(num_samples: int = 10):
         input_device = first_param.device if first_param is not None else torch.device("cpu")
 
         scorer = rouge_lib.RougeScorer(["rougeL"], use_stemmer=True)
-        rouge_scores, exact_matches, samples = [], [], []
+        rouge_scores, samples = [], []
         reasoning_retry_count = 0
 
         eval_data = test_dataset.select(range(min(num_samples, len(test_dataset))))
@@ -173,8 +173,6 @@ def run_evaluation(num_samples: int = 10):
                 model_answer = generated_content.strip()
 
             # Metric Calculation
-            exact = 1 if model_answer.strip() == expected.strip() else 0
-            exact_matches.append(exact)
             score = scorer.score(expected, model_answer)
             rouge_scores.append(score["rougeL"].fmeasure)
 
@@ -193,17 +191,34 @@ def run_evaluation(num_samples: int = 10):
                     score["rougeL"].fmeasure,
                     4
                 ),
-                "exact_match": exact
             })
 
         avg_rouge = round(float(np.mean(rouge_scores)), 4)
-        avg_exact = round(float(np.mean(exact_matches)) * 100, 2)
+
+        # Compute BERTScore for all samples at once (much more efficient)
+        all_predictions = [s["model_output"] for s in samples]
+        all_references = [s["expected"] for s in samples]
+
+        from bert_score import score as bert_score_fn
+        P, R, F1 = bert_score_fn(
+            all_predictions,
+            all_references,
+            lang="en",
+            verbose=False,
+        )
+        bert_f1_scores = F1.tolist()
+
+        # Attach per-sample BERTScore
+        for i, s in enumerate(samples):
+            s["bert_score_f1"] = round(bert_f1_scores[i], 4)
+
+        avg_bert_f1 = round(float(np.mean(bert_f1_scores)) * 100, 2)
 
         reasoning_present_count = sum(1 for s in samples if s.get("model_reasoning", "").strip())
 
         result = {
             "rouge_l": avg_rouge,
-            "exact_match_percent": avg_exact,
+            "bert_score_f1": avg_bert_f1,
             "samples_evaluated": len(eval_data),
             "reasoning_present_count": reasoning_present_count,
             "reasoning_retry_count": reasoning_retry_count,

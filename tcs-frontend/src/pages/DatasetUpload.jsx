@@ -11,7 +11,6 @@ import {
   Loader2,
   Database,
   FileText,
-  CheckCircle2,
 } from 'lucide-react';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
@@ -29,11 +28,7 @@ export default function DatasetUpload() {
   const [file, setFile] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = useRef(null);
-  // Eval dataset state (new)
-  const [evalFile, setEvalFile] = useState(null);
-  const [evalLoading, setEvalLoading] = useState(false);
-  const [evalResult, setEvalResult] = useState(null);
-  const evalFileInputRef = useRef(null);
+
 
   const previewItems = useMemo(() => (dataset?.preview || []).slice(0, 5), [dataset]);
   const hasDataset = previewItems.length > 0;
@@ -95,21 +90,7 @@ export default function DatasetUpload() {
     }
   };
 
-  const handleEvalUpload = async () => {
-    if (!evalFile || evalLoading) return;
-    setEvalLoading(true);
-    try {
-      const res = await api.uploadEvalDataset(evalFile);
-      if (res?.success) {
-        setEvalResult({ size: res.size, preview: res.preview });
-        toast.success(`Eval dataset loaded: ${res.size} entries. Training data unchanged.`);
-      }
-    } catch {
-      // API layer toast handles failure.
-    } finally {
-      setEvalLoading(false);
-    }
-  };
+
 
   return (
     <div className="max-w-[1600px] mx-auto min-h-0 flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500 px-2">
@@ -213,48 +194,7 @@ export default function DatasetUpload() {
             )}
           </div>
 
-          {/* ── Eval Dataset Upload (separate, new) ── */}
-          <div className="mt-2 pt-4 border-t border-border/40 flex flex-col gap-2">
-            <div className="text-[10px] uppercase tracking-[0.22em] font-bold text-textMuted flex items-center gap-2">
-              <CheckCircle2 size={11} className="text-warning" /> Separate Evaluation Dataset
-            </div>
-            <p className="text-[11px] text-textMuted leading-relaxed">
-              Upload a different JSON file with re-phrased questions for proper held-out evaluation.
-              This replaces <span className="font-semibold text-textMain">only</span> the test split — training data is not touched.
-            </p>
-            <div
-              className="w-full border border-dashed border-warning/40 rounded-xl px-3 py-3 flex flex-col items-center gap-2 cursor-pointer hover:border-warning/70 transition-all bg-background/40"
-              onClick={() => evalFileInputRef.current?.click()}
-            >
-              <input
-                ref={evalFileInputRef}
-                type="file"
-                className="hidden"
-                accept=".json,application/json"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) setEvalFile(f);
-                }}
-              />
-              <UploadCloud size={20} className="text-warning" />
-              <span className="text-xs text-textMuted">
-                {evalFile ? evalFile.name : 'Click to select eval JSON'}
-              </span>
-            </div>
-            {evalResult && (
-              <div className="text-xs text-success">
-                ✓ Eval dataset loaded: {evalResult.size} entries
-              </div>
-            )}
-            <button
-              onClick={handleEvalUpload}
-              disabled={!evalFile || evalLoading || status === 'training'}
-              className="w-full px-4 py-2.5 rounded-xl bg-warning/20 hover:bg-warning/30 border border-warning/30 text-warning font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {evalLoading ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />}
-              {evalLoading ? 'Loading eval...' : 'Upload Eval Dataset'}
-            </button>
-          </div>
+
         </div>
 
         <div className="bg-surface border border-border/50 rounded-3xl p-5 shadow-xl flex flex-col min-h-0">

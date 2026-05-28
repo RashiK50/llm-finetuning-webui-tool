@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import StepFlow from '../components/ui/StepFlow';
 import { api } from '../api';
 import { useGlobalState } from '../context/GlobalState';
-import { BarChart2, ChevronDown, ChevronUp, CheckCircle2, Play, Settings2, Minus, Plus } from 'lucide-react';
+import { BarChart2, ChevronDown, ChevronUp, CheckCircle2, Play, Settings2, Minus, Plus, UploadCloud, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
@@ -11,10 +11,31 @@ export default function Evaluation() {
   const [isLoading, setIsLoading] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const [numSamples, setNumSamples] = useState(10);
+  // Eval dataset upload state (moved from DatasetUpload)
+  const [evalFile, setEvalFile] = useState(null);
+  const [evalLoading, setEvalLoading] = useState(false);
+  const [evalResult, setEvalResult] = useState(null);
+  const evalFileInputRef = useRef(null);
 
   const metrics = evalResults;
   const hasRun = !!metrics;
   const sanitizedSampleCount = Math.max(1, Math.min(100, Number(numSamples) || 10));
+
+  const handleEvalUpload = async () => {
+    if (!evalFile || evalLoading) return;
+    setEvalLoading(true);
+    try {
+      const res = await api.uploadEvalDataset(evalFile);
+      if (res?.success) {
+        setEvalResult({ size: res.size, preview: res.preview });
+        toast.success(`Eval dataset loaded: ${res.size} entries.`);
+      }
+    } catch {
+      // API layer toast handles failure.
+    } finally {
+      setEvalLoading(false);
+    }
+  };
 
   const handleRunEvaluation = async () => {
     if (sanitizedSampleCount !== numSamples) {
@@ -34,7 +55,7 @@ export default function Evaluation() {
   };
 
   const rouge = metrics?.rouge_l || 0;
-  const exactMatch = (metrics?.exact_match_percent || 0) / 100;
+  const bertScoreF1 = (metrics?.bert_score_f1 || 0) / 100;
   const samples = useMemo(() => metrics?.samples || [], [metrics]);
   const reasoningPresentCount = Number(metrics?.reasoning_present_count || 0);
   const reasoningRetryCount = Number(metrics?.reasoning_retry_count || 0);
@@ -72,8 +93,51 @@ export default function Evaluation() {
           </div>
           <h2 className="text-xl font-bold text-textMain">Run Evaluation</h2>
           <p className="text-sm text-textMuted">
-            ROUGE-L compares sequence overlap quality. Exact Match checks fully correct answers.
+            ROUGE-L compares sequence overlap quality. BERTScore measures semantic similarity.
           </p>
+
+          {/* ── Eval Dataset Upload ── */}
+          <div className="flex flex-col gap-2 p-3 bg-background/60 border border-border/40 rounded-2xl">
+            <div className="text-[10px] uppercase tracking-[0.22em] font-bold text-textMuted flex items-center gap-2">
+              <UploadCloud size={11} className="text-warning" /> Evaluation Dataset
+            </div>
+            <p className="text-[11px] text-textMuted leading-relaxed">
+              Upload a JSON file for evaluation. This replaces <span className="font-semibold text-textMain">only</span> the test split.
+            </p>
+            <div
+              className="w-full border border-dashed border-warning/40 rounded-xl px-3 py-3 flex flex-col items-center gap-2 cursor-pointer hover:border-warning/70 transition-all bg-background/40"
+              onClick={() => evalFileInputRef.current?.click()}
+            >
+              <input
+                ref={evalFileInputRef}
+                type="file"
+                className="hidden"
+                accept=".json,application/json"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) setEvalFile(f);
+                }}
+              />
+              <UploadCloud size={18} className="text-warning" />
+              <span className="text-xs text-textMuted">
+                {evalFile ? evalFile.name : 'Click to select eval JSON'}
+              </span>
+            </div>
+            {evalResult && (
+              <div className="text-xs text-success font-semibold">
+                ✓ Eval dataset loaded: {evalResult.size} entries
+              </div>
+            )}
+            <button
+              onClick={handleEvalUpload}
+              disabled={!evalFile || evalLoading}
+              className="w-full px-4 py-2 rounded-xl bg-warning/20 hover:bg-warning/30 border border-warning/30 text-warning font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {evalLoading ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />}
+              {evalLoading ? 'Loading eval...' : 'Upload Eval Dataset'}
+            </button>
+          </div>
+
           <div className="flex flex-col gap-1 w-full bg-background border border-border/50 rounded-xl px-4 py-3">
             <label className="text-[10px] font-bold text-textMuted uppercase tracking-[0.2em]">Evaluation Samples</label>
             <div className="flex items-center gap-2">
@@ -130,8 +194,8 @@ export default function Evaluation() {
                   <div className="text-3xl font-extrabold text-primary">{(rouge * 100).toFixed(1)}%</div>
                 </div>
                 <div className="bg-background border border-border/50 p-4 rounded-2xl">
-                  <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-textMuted mb-2">Exact Match</div>
-                  <div className="text-3xl font-extrabold text-accent">{(exactMatch * 100).toFixed(1)}%</div>
+                  <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-textMuted mb-2">BERTScore F1</div>
+                  <div className="text-3xl font-extrabold text-accent">{(bertScoreF1 * 100).toFixed(1)}%</div>
                 </div>
               </div>
               <div className="mb-3 text-xs text-textMuted">

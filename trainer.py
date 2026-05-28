@@ -2,6 +2,7 @@ import os
 import torch
 import traceback
 import platform
+import numpy as np
 
 from transformers import Trainer, TrainingArguments, TrainerCallback
 from peft import (
@@ -23,6 +24,39 @@ class StateUpdateCallback(TrainerCallback):
 
             if state.epoch:
                 ss.state["current_epoch"] = round(state.epoch, 2)
+
+        # Capture eval accuracy if present (from eval during training)
+        if logs and "eval_accuracy" in logs:
+            ss.state["training_accuracy"].append(round(logs["eval_accuracy"], 4))
+
+
+def preprocess_logits_for_metrics(logits, labels):
+    """
+    Reduce logits to argmax predictions to save memory during eval.
+    Only the predictions are needed for accuracy computation.
+    """
+    if isinstance(logits, tuple):
+        logits = logits[0]
+    return logits.argmax(dim=-1)
+
+
+def compute_metrics(eval_preds):
+    """
+    Token-level accuracy: compare predicted next tokens to actual labels.
+    Ignores padding tokens (label == -100).
+    """
+    predictions, labels = eval_preds
+    # Shift: predictions[i] predicts labels[i+1] in causal LM
+    predictions = predictions[:, :-1]
+    labels = labels[:, 1:]
+
+    mask = labels != -100
+    if mask.sum() == 0:
+        return {"accuracy": 0.0}
+
+    correct = (predictions == labels) & mask
+    accuracy = correct.sum().item() / mask.sum().item()
+    return {"accuracy": round(accuracy, 4)}
 
 
 def _push_lora_to_hf(model, tokenizer, hf_repo_id: str):
@@ -60,6 +94,7 @@ def run_training(**kwargs):
 
         ss.state["status"] = "training"
         ss.state["training_loss"] = []
+        ss.state["training_accuracy"] = []
         ss.state["current_step"] = 0
         ss.state["current_epoch"] = 0
         # Reset any previous push state
@@ -159,13 +194,21 @@ def run_training(**kwargs):
             gradient_checkpointing=False,
 
             remove_unused_columns=False,
+
+            # Evaluate periodically for accuracy tracking
+            eval_strategy="steps",
+            eval_steps=max(1, int(len(dataset) / (int(batch_size) * 4))),  # ~once per epoch
+            per_device_eval_batch_size=int(batch_size),
         )
 
         trainer = Trainer(
             model=model,
             args=training_args,
             train_dataset=tokenized_dataset,
-            callbacks=[StateUpdateCallback()]
+            eval_dataset=tokenized_dataset.select(range(min(50, len(tokenized_dataset)))),
+            callbacks=[StateUpdateCallback()],
+            compute_metrics=compute_metrics,
+            preprocess_logits_for_metrics=preprocess_logits_for_metrics,
         )
 
         trainer.train()

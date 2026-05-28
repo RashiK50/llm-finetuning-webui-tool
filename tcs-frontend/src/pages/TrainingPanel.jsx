@@ -124,10 +124,12 @@ const SliderConfig = ({ label, min, max, step, value, onChange, disabled, toolti
   );
 };
 
-const LossTooltip = ({ active, payload, label }) => {
+const TrainingTooltip = ({ active, payload, label }) => {
   if (!active || !payload || payload.length === 0) return null;
-  const current = Number(payload[0]?.value || 0);
-  const prev = Number(payload[1]?.payload?.prevLoss ?? current);
+  const lossEntry = payload.find((p) => p.dataKey === 'loss');
+  const accEntry = payload.find((p) => p.dataKey === 'accuracy');
+  const current = Number(lossEntry?.value || 0);
+  const prev = Number(lossEntry?.payload?.prevLoss ?? current);
   const delta = current - prev;
   const improving = delta <= 0;
 
@@ -138,6 +140,9 @@ const LossTooltip = ({ active, payload, label }) => {
       <p className={`text-[11px] mt-1 font-semibold ${improving ? 'text-success' : 'text-warning'}`}>
         {delta >= 0 ? '+' : ''}{delta.toFixed(4)} vs prev
       </p>
+      {accEntry?.value != null && (
+        <p className="text-sm font-extrabold text-accent mt-1">Accuracy: {(Number(accEntry.value) * 100).toFixed(1)}%</p>
+      )}
     </div>
   );
 };
@@ -156,7 +161,8 @@ export default function TrainingPanel() {
   } = useGlobalState();
   const [isLoading, setIsLoading] = useState(false);
   const [data, setData] = useState([]);
-  const [hfRepoId, setHfRepoId] = useState('');
+  const [accuracyData, setAccuracyData] = useState([]);
+
   const [chartMode, setChartMode] = useState('smooth');
   const [windowSize, setWindowSize] = useState(120);
   const [errorMsg, setErrorMsg] = useState(null);
@@ -212,7 +218,7 @@ export default function TrainingPanel() {
     setIsLoading(true);
     setErrorMsg(null);
     try {
-      const res = await api.train({ ...config, hf_repo_id: hfRepoId.trim() });
+      const res = await api.train({ ...config });
       if (res?.success) {
         setStatus('training');
         setData([]);
@@ -234,6 +240,7 @@ export default function TrainingPanel() {
       try {
         const d = await api.progress();
         const losses = d.all_losses ?? d.training_loss ?? [];
+        const accuracies = d.all_accuracies ?? d.training_accuracy ?? [];
         setData(
           losses.map((loss, idx) => ({
             step: idx + 1,
@@ -241,6 +248,7 @@ export default function TrainingPanel() {
             prevLoss: idx > 0 ? losses[idx - 1] : loss,
           })),
         );
+        setAccuracyData(accuracies);
       } catch {
         // Shared API toast handles backend connectivity failures.
       }
@@ -268,12 +276,29 @@ export default function TrainingPanel() {
     : 0;
   const latestLoss = data.length > 0 ? data[data.length - 1].loss : 0;
   const bestLoss = data.length > 0 ? Math.min(...data.map((d) => Number(d.loss || 0))) : 0;
+  const latestAccuracy = accuracyData.length > 0 ? accuracyData[accuracyData.length - 1] : null;
   const maxVisibleSteps = Math.max(minVisibleSteps, data.length || minVisibleSteps);
   const effectiveWindowSize = Math.min(windowSize, maxVisibleSteps);
   const visibleData = useMemo(() => {
-    if (data.length <= effectiveWindowSize) return data;
-    return data.slice(data.length - effectiveWindowSize);
-  }, [data, effectiveWindowSize]);
+    const base = data.length <= effectiveWindowSize ? data : data.slice(data.length - effectiveWindowSize);
+    // Merge accuracy data into chart data points
+    // Accuracy is logged less frequently (per eval step), so we interpolate
+    if (accuracyData.length === 0) return base;
+    return base.map((point) => {
+      // Find the closest accuracy measurement for this step
+      // accuracy measurements are sparse, so we use the latest one at or before this step's index
+      const stepIdx = point.step - 1;
+      const totalSteps = data.length;
+      const accIdx = Math.min(
+        accuracyData.length - 1,
+        Math.floor((stepIdx / Math.max(1, totalSteps - 1)) * accuracyData.length)
+      );
+      return {
+        ...point,
+        accuracy: accIdx >= 0 ? accuracyData[accIdx] : null,
+      };
+    });
+  }, [data, effectiveWindowSize, accuracyData]);
   const isReady = !!model && !!dataset;
 
   useEffect(() => {
@@ -289,9 +314,10 @@ export default function TrainingPanel() {
 
   const metrics = useMemo(() => [
     { label: 'Current Loss', value: latestLoss ? latestLoss.toFixed(4) : '0.0000' },
+    { label: 'Accuracy', value: latestAccuracy != null ? `${(latestAccuracy * 100).toFixed(1)}%` : '—', accent: true },
     { label: 'Epoch', value: `${currentEpoch || 0} / ${maxEpochs}` },
     { label: 'Total Steps', value: `${currentStep || 0}` },
-  ], [latestLoss, currentEpoch, maxEpochs, currentStep]);
+  ], [latestLoss, latestAccuracy, currentEpoch, maxEpochs, currentStep]);
 
   return (
     <div className="max-w-[1650px] mx-auto h-full min-h-0 overflow-x-hidden flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500 px-2">
@@ -444,23 +470,6 @@ export default function TrainingPanel() {
           </div>
 
           <div className="mt-3 pt-4 border-t border-border/30 shrink-0 bg-surface flex flex-col gap-2">
-            {/* HF push repo input */}
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] uppercase tracking-[0.22em] font-bold text-textMuted">
-                Push to HF after training (optional)
-              </label>
-              <input
-                type="text"
-                value={hfRepoId}
-                onChange={(e) => setHfRepoId(e.target.value)}
-                placeholder="your-username/my-finetuned-lora"
-                disabled={isFormDisabled}
-                className="w-full bg-background border border-border/50 text-textMain rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
-              />
-              <p className="text-[10px] text-textMuted">
-                Leave blank to skip HF push. Requires HF_TOKEN in .env with write access.
-              </p>
-            </div>
             <button
               onClick={handleStartTraining}
               disabled={isFormDisabled}
@@ -483,11 +492,11 @@ export default function TrainingPanel() {
         </div>
 
         <div className="flex flex-col gap-4 min-h-0">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 shrink-0">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 shrink-0">
             {metrics.map((metric) => (
               <div key={metric.label} className="bg-surface border border-border/50 p-4 rounded-2xl shadow-sm">
                 <span className="text-[10px] font-bold text-textMuted uppercase tracking-[0.24em]">{metric.label}</span>
-                <div className="mt-2 text-2xl font-extrabold text-textMain">{metric.value}</div>
+                <div className={`mt-2 text-2xl font-extrabold ${metric.accent ? 'text-accent' : 'text-textMain'}`}>{metric.value}</div>
               </div>
             ))}
           </div>
@@ -495,8 +504,8 @@ export default function TrainingPanel() {
           <div className="bg-surface border border-border/50 rounded-3xl p-5 shadow-xl flex flex-col min-h-0 flex-1">
             <div className="flex items-center justify-between gap-3 mb-3 shrink-0">
               <div>
-                <h3 className="text-sm font-bold text-textMain">Live Loss Curve</h3>
-                <p className="text-xs text-textMuted mt-1">Updates from `/api/progress` while training runs.</p>
+                <h3 className="text-sm font-bold text-textMain">Live Loss & Accuracy</h3>
+                <p className="text-xs text-textMuted mt-1">Loss (blue, left axis) · Accuracy (teal, right axis)</p>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -534,22 +543,28 @@ export default function TrainingPanel() {
 
             <div className="flex-1 min-h-0 w-full bg-background/50 rounded-2xl p-3 border border-border/30">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={visibleData} margin={{ top: 8, right: 10, bottom: 4, left: -12 }}>
+                <LineChart data={visibleData} margin={{ top: 8, right: 40, bottom: 4, left: -12 }}>
                   <defs>
                     <linearGradient id="lossFill" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.3} />
                       <stop offset="100%" stopColor="#3B82F6" stopOpacity={0.02} />
                     </linearGradient>
+                    <linearGradient id="accFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#06B6D4" stopOpacity={0.2} />
+                      <stop offset="100%" stopColor="#06B6D4" stopOpacity={0.02} />
+                    </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#2A2E39" vertical={false} />
                   <XAxis dataKey="step" stroke="#94A3B8" fontSize={10} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#94A3B8" fontSize={10} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+                  <YAxis yAxisId="loss" stroke="#94A3B8" fontSize={10} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+                  <YAxis yAxisId="accuracy" orientation="right" stroke="#06B6D4" fontSize={10} tickLine={false} axisLine={false} domain={[0, 1]} tickFormatter={(v) => `${(v * 100).toFixed(0)}%`} />
                   <RechartsTooltip
-                    content={<LossTooltip />}
+                    content={<TrainingTooltip />}
                     cursor={{ stroke: '#334155', strokeWidth: 1, strokeDasharray: '5 5' }}
                   />
                   {bestLoss > 0 && (
                     <ReferenceLine
+                      yAxisId="loss"
                       y={bestLoss}
                       stroke="#10B981"
                       strokeDasharray="4 4"
@@ -558,6 +573,7 @@ export default function TrainingPanel() {
                     />
                   )}
                   <Area
+                    yAxisId="loss"
                     type={chartMode === 'smooth' ? 'monotone' : 'linear'}
                     dataKey="loss"
                     stroke="none"
@@ -565,6 +581,7 @@ export default function TrainingPanel() {
                     isAnimationActive={false}
                   />
                   <Line
+                    yAxisId="loss"
                     type={chartMode === 'smooth' ? 'monotone' : 'linear'}
                     dataKey="loss"
                     stroke="#3B82F6"
@@ -573,6 +590,31 @@ export default function TrainingPanel() {
                     activeDot={{ r: 4, fill: '#10B981', stroke: '#1E212B', strokeWidth: 2 }}
                     isAnimationActive={false}
                   />
+                  {accuracyData.length > 0 && (
+                    <>
+                      <Area
+                        yAxisId="accuracy"
+                        type={chartMode === 'smooth' ? 'monotone' : 'linear'}
+                        dataKey="accuracy"
+                        stroke="none"
+                        fill="url(#accFill)"
+                        isAnimationActive={false}
+                        connectNulls
+                      />
+                      <Line
+                        yAxisId="accuracy"
+                        type={chartMode === 'smooth' ? 'monotone' : 'linear'}
+                        dataKey="accuracy"
+                        stroke="#06B6D4"
+                        strokeWidth={2}
+                        strokeDasharray="6 3"
+                        dot={false}
+                        activeDot={{ r: 4, fill: '#06B6D4', stroke: '#1E212B', strokeWidth: 2 }}
+                        isAnimationActive={false}
+                        connectNulls
+                      />
+                    </>
+                  )}
                 </LineChart>
               </ResponsiveContainer>
             </div>

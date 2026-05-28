@@ -30,6 +30,7 @@ state = {
     # Training
     "trainer": None,
     "training_loss": [],
+    "training_accuracy": [],
     "current_epoch": 0,
     "current_step": 0,
     "lora_config": None,

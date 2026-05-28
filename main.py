@@ -405,8 +405,9 @@ def start_training(request: TrainRequest, background_tasks: BackgroundTasks):
 
 @app.get("/api/progress", tags=["Team 2 — Training & Evaluation"])
 def get_progress():
-    """Poll this every 2-3 seconds during training to get live loss updates."""
+    """Poll this every 2-3 seconds during training to get live loss and accuracy updates."""
     losses = ss.state.get("training_loss", [])
+    accuracies = ss.state.get("training_accuracy", [])
     return {
         "status": ss.state.get("status"),
         "current_epoch": ss.state.get("current_epoch"),
@@ -414,6 +415,9 @@ def get_progress():
         "latest_loss": losses[-1] if losses else None,
         "all_losses": losses,
         "training_loss": losses,
+        "latest_accuracy": accuracies[-1] if accuracies else None,
+        "all_accuracies": accuracies,
+        "training_accuracy": accuracies,
         "error_message": ss.state.get("error_message"),
     }
 
